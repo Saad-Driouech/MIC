@@ -9,3 +9,5 @@ wandb/
 *.txt
 
 *.pth
+
+data
