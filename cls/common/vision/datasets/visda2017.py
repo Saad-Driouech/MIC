@@ -47,7 +47,7 @@ class VisDA2017(ImageList):
         if download:
             list(map(lambda args: download_data(root, *args), self.download_list))
         else:
-            list(map(lambda file_name, _: check_exits(root, file_name), self.download_list))
+            list(map(lambda item: check_exits(root, item[0]), self.download_list))
 
         super(VisDA2017, self).__init__(root, VisDA2017.CLASSES, data_list_file=data_list_file, **kwargs)
 
