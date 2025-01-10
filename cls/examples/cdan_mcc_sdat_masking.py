@@ -8,6 +8,7 @@ import shutil
 import os.path as osp
 import os
 import wandb
+from dotenv import load_dotenv
 
 import torch
 import torch.nn as nn
@@ -33,12 +34,18 @@ from common.utils.sam import SAM
 sys.path.append('.')
 import utils
 
+load_dotenv()
 
 def main(args: argparse.Namespace):
     logger = CompleteLogger(args.log, args.phase)
     print(args)
 
     if args.log_results:
+        api_key = os.getenv("WANDB_API_KEY")
+        if not api_key:
+            raise EnvironmentError("WANDB_API_KEY not set in environment variables.")
+        
+        wandb.login(key=api_key)
         wandb.init(
             project="MIC",
             name=args.log_name)
