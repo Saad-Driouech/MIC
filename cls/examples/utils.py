@@ -101,9 +101,9 @@ def get_dataset(dataset_name, root, source, target, train_source_transform, val_
         def concat_dataset(tasks, **kwargs):
             return ConcatDataset([dataset(task=task, **kwargs) for task in tasks])
 
-        train_source_dataset = concat_dataset(root=root, tasks=source, download=True, transform=train_source_transform)
-        train_target_dataset = concat_dataset(root=root, tasks=target, download=True, transform=train_target_transform)
-        val_dataset = concat_dataset(root=root, tasks=target, download=True, transform=val_transform)
+        train_source_dataset = concat_dataset(root=root, tasks=source, download=False, transform=train_source_transform)
+        train_target_dataset = concat_dataset(root=root, tasks=target, download=False, transform=train_target_transform)
+        val_dataset = concat_dataset(root=root, tasks=target, download=False, transform=val_transform)
         if dataset_name == 'DomainNet':
             test_dataset = concat_dataset(root=root, tasks=target, split='test', download=True, transform=val_transform)
         else:
