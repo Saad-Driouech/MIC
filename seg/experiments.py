@@ -8,6 +8,9 @@ import os
 
 from mmcv import Config
 
+import warnings
+warnings.filterwarnings("ignore", category=DeprecationWarning)
+
 # flake8: noqa
 
 
@@ -297,7 +300,7 @@ def generate_experiment_cfgs(id):
         # Setup runner
         cfg['runner'] = dict(type='IterBasedRunner', max_iters=iters)
         cfg['checkpoint_config'] = dict(
-            by_epoch=False, interval=iters, max_keep_ckpts=1)
+            by_epoch=False, interval=iters // 10, max_keep_ckpts=1)
         cfg['evaluation'] = dict(interval=iters // 10, metric='mIoU')
 
         # Construct config name
@@ -415,7 +418,7 @@ def generate_experiment_cfgs(id):
     # MIC with Further UDA Methods (Table 1)
     # -------------------------------------------------------------------------
     elif id == 81:
-        seeds = [0, 1, 2]
+        seeds = [0]
         #        opt,     lr,      schedule,     pmult
         sgd   = ('sgd',   0.0025,  'poly10warm', False)
         adamw = ('adamw', 0.00006, 'poly10warm', True)
@@ -427,16 +430,16 @@ def generate_experiment_cfgs(id):
         uda_hrda =     ('dacs_a999_fdthings', 0.01,  'v2',   *adamw)
         mask_mode, mask_ratio = 'separatetrgaug', 0.7
         for architecture,                      backbone,  uda_hp in [
-            ('dlv2red',                        'r101v1c', uda_advseg),
-            ('dlv2red',                        'r101v1c', uda_minent),
-            ('dlv2red',                        'r101v1c', uda_dacs),
-            ('dlv2red',                        'r101v1c', uda_daformer),
-            ('hrda1-512-0.1_dlv2red',          'r101v1c', uda_hrda),
-            ('daformer_sepaspp',               'mitb5',   uda_daformer),
-            # ('hrda1-512-0.1_daformer_sepaspp', 'mibt5',   uda_hrda),  # already run in exp 80
+            # ('dlv2red',                        'r101v1c', uda_advseg),
+            # ('dlv2red',                        'r101v1c', uda_minent),
+            # ('dlv2red',                        'r101v1c', uda_dacs),
+            # ('dlv2red',                        'r101v1c', uda_daformer),
+            # ('hrda1-512-0.1_dlv2red',          'r101v1c', uda_hrda),
+            # ('daformer_sepaspp',               'mitb5',   uda_daformer),
+            ('hrda1-512-0.1_daformer_sepaspp', 'mitb5',   uda_hrda),  # already run in exp 80
         ]:
             if 'hrda' in architecture:
-                source, target, crop = 'gtaHR', 'cityscapesHR', '1024x1024'
+                source, target, crop = 'gtaHR', 'cityscapesCAugHR', '1024x1024'
                 rcs_min_crop = 0.5 * (2 ** 2)
                 gpu_model = 'NVIDIATITANRTX'
                 inference = 'slide'
