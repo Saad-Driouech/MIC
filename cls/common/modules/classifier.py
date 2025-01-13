@@ -78,7 +78,8 @@ class Classifier(nn.Module):
         """"""
         f = self.backbone(x)
         # f = self.pool_layer(f)
-        f = f.mean(dim=1)
+        # f = f.mean(dim=1) # average pooling
+        f = f[:, 0, :] # using the CLS token only
         f = self.bottleneck(f)
         predictions = self.head(f)
         if self.training:
