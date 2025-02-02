@@ -1,14 +1,16 @@
 from torch.utils.data import Dataset
-from diffusers import StableDiffusionControlNetPipeline, ControlNetModel, UniPCMultistepScheduler
+from diffusers import StableDiffusionControlNetPipeline, ControlNetModel, UniPCMultistepScheduler, DDIMScheduler
 import torch
 from torch.utils.data import DataLoader
 import os
 from PIL import Image
 import numpy as np
 import cv2
+from torchvision import transforms
+import time
 
 class DiffusionAugmentationDataset(Dataset):
-    def __init__(self, image_paths, diffusion_pipeline, key_words, negative_prompt, transform=None):
+    def __init__(self, image_paths, diffusion_pipeline, key_words, negative_prompt):
         """
         Args:
             image_paths (list): List of image file paths.
@@ -21,7 +23,9 @@ class DiffusionAugmentationDataset(Dataset):
         self.diffusion_pipeline = diffusion_pipeline
         self.key_words = key_words
         self.negative_prompt = negative_prompt
-        self.transform = transform
+        self.transform = transforms.Compose([
+            transforms.ToTensor(),  # Convert PIL image to tensor
+        ])
 
     def __len__(self):
         return len(self.image_paths)
@@ -40,6 +44,7 @@ class DiffusionAugmentationDataset(Dataset):
         # Generate image
         generator = torch.Generator(device="cuda" if torch.cuda.is_available() else "cpu").manual_seed(0)
 
+        start_time = time.time()
         augmented_image = pipe(
             prompt=text_prompt, 
             num_inference_steps=10, 
@@ -47,10 +52,8 @@ class DiffusionAugmentationDataset(Dataset):
             generator=generator, 
             image=image
         ).images[0]
-
-        # Apply additional transforms (if any)
-        if self.transform:
-            augmented_image = self.transform(augmented_image)
+        generation_time = time.time() - start_time
+        print(f"Image generation time: {generation_time:.5f} seconds")
 
         # Save the image
         directory_path = os.path.dirname(original_path)
@@ -60,6 +63,10 @@ class DiffusionAugmentationDataset(Dataset):
         os.makedirs(save_dir, exist_ok=True)
         save_path = os.path.join(save_dir, f"{file_name}")
         augmented_image.save(save_path)
+
+        # Apply transforms (if any)
+        if self.transform:
+            augmented_image = self.transform(augmented_image)
 
         return augmented_image
 
@@ -92,7 +99,7 @@ if __name__ == "__main__":
         print("Using CPU as fallback.")
 
     # Load ControlNet
-    controlnet = ControlNetModel.from_pretrained("MIC/aug_pipeline/controlnet", torch_dtype=dtype)
+    controlnet = ControlNetModel.from_pretrained("controlnet", torch_dtype=dtype)
     
     # Load diffusion pipeline
     pipe = StableDiffusionControlNetPipeline.from_pretrained(
@@ -100,7 +107,7 @@ if __name__ == "__main__":
     )
 
     # Set scheduler
-    pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config)
+    pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config, timestep_spacing="trailing")
 
     pipe.to(device)
 
@@ -110,14 +117,13 @@ if __name__ == "__main__":
     # Dataset instantiation
     dataset = DiffusionAugmentationDataset(
         image_paths=[
-            "MIC/aug_pipeline/images/berlin_000003_000019_leftImg8bit.png", 
-            "MIC/aug_pipeline/images/berlin_000058_000019_leftImg8bit.png",
-            "MIC/aug_pipeline/images/berlin_000446_000019_leftImg8bit.png"
+            "images/berlin_000003_000019_leftImg8bit.png", 
+            "images/berlin_000058_000019_leftImg8bit.png",
+            "images/berlin_000446_000019_leftImg8bit.png"
         ],
         diffusion_pipeline=pipe,
         key_words=["snowy", "golden hour"],
         negative_prompt="monochrome, trees in sky",
-        transform=None,
     )
 
     dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
