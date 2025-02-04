@@ -27,6 +27,10 @@ class DiffusionAugmentationDataset(Dataset):
             transforms.ToTensor(),  # Convert PIL image to tensor
         ])
 
+        self.scheduler_name = diffusion_pipeline.scheduler.__class__.__name__
+        self.timestep_spacing = getattr(diffusion_pipeline.scheduler, "timestep_spacing", "default")
+        self.num_inference_steps = 10
+
     def __len__(self):
         return len(self.image_paths)
 
@@ -47,7 +51,7 @@ class DiffusionAugmentationDataset(Dataset):
         start_time = time.time()
         augmented_image = pipe(
             prompt=text_prompt, 
-            num_inference_steps=10, 
+            num_inference_steps=self.num_inference_steps, 
             negative_prompt=self.negative_prompt,
             generator=generator, 
             image=image
@@ -58,8 +62,11 @@ class DiffusionAugmentationDataset(Dataset):
         # Save the image
         directory_path = os.path.dirname(original_path)
         file_name = os.path.basename(original_path)
-        save_dir = os.path.join(directory_path, "augmented")
-        print(f"Saving augmented image to {save_dir}")
+        save_dir = os.path.join(
+            directory_path,
+            f"{self.scheduler_name}_{self.timestep_spacing}",
+            f"augmented_{self.num_inference_steps}steps"
+        )
         os.makedirs(save_dir, exist_ok=True)
         save_path = os.path.join(save_dir, f"{file_name}")
         augmented_image.save(save_path)
@@ -107,7 +114,7 @@ if __name__ == "__main__":
     )
 
     # Set scheduler
-    pipe.scheduler = UniPCMultistepScheduler.from_config(pipe.scheduler.config, timestep_spacing="trailing")
+    pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config, timestep_spacing="linspace")
 
     pipe.to(device)
 
