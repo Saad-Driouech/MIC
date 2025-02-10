@@ -1,5 +1,5 @@
 from torch.utils.data import Dataset
-from diffusers import StableDiffusionControlNetPipeline, ControlNetModel, UniPCMultistepScheduler, DDIMScheduler
+from diffusers import StableDiffusionControlNetPipeline, ControlNetModel, UniPCMultistepScheduler, DDIMScheduler, AutoencoderKL, EulerDiscreteScheduler, EulerAncestralDiscreteScheduler, PNDMScheduler
 import torch
 from torch.utils.data import DataLoader
 import os
@@ -10,7 +10,7 @@ from torchvision import transforms
 import time
 
 class DiffusionAugmentationDataset(Dataset):
-    def __init__(self, image_paths, diffusion_pipeline, key_words, negative_prompt):
+    def __init__(self, image_paths, diffusion_pipeline, key_words, negative_prompt, resize, crop):
         """
         Args:
             image_paths (list): List of image file paths.
@@ -28,8 +28,12 @@ class DiffusionAugmentationDataset(Dataset):
         ])
 
         self.scheduler_name = diffusion_pipeline.scheduler.__class__.__name__
-        self.timestep_spacing = getattr(diffusion_pipeline.scheduler, "timestep_spacing", "default")
-        self.num_inference_steps = 10
+        self.timestep_spacing = diffusion_pipeline.scheduler.config.timestep_spacing
+        self.num_inference_steps = 25
+        self.cfg_scale = 5
+        self.resize = resize
+        self.crop = crop
+
 
     def __len__(self):
         return len(self.image_paths)
@@ -52,6 +56,7 @@ class DiffusionAugmentationDataset(Dataset):
         augmented_image = pipe(
             prompt=text_prompt, 
             num_inference_steps=self.num_inference_steps, 
+            guidance_scale=self.cfg_scale,
             negative_prompt=self.negative_prompt,
             generator=generator, 
             image=image
@@ -65,7 +70,8 @@ class DiffusionAugmentationDataset(Dataset):
         save_dir = os.path.join(
             directory_path,
             f"{self.scheduler_name}_{self.timestep_spacing}",
-            f"augmented_{self.num_inference_steps}steps"
+            f"augmented_{self.num_inference_steps}steps_{self.cfg_scale}scale",
+            f"resize_{self.resize}_crop_{self.crop}"
         )
         os.makedirs(save_dir, exist_ok=True)
         save_path = os.path.join(save_dir, f"{file_name}")
@@ -80,10 +86,35 @@ class DiffusionAugmentationDataset(Dataset):
     def load_image(self, path):
         # Load the image using PIL and convert to RGB
         image = Image.open(path).convert("RGB")
+
+        # Preprocess the image
+        preprocess = []
+    
+        # Add resize only if resize_size is provided
+        if self.resize:
+            aspect_ratio = image.width / image.height
+            target_width, target_height = 1024, int(1024 / aspect_ratio)
+            preprocess.append(transforms.Resize((target_width, target_height)))
+        
+        # Add center crop only if crop_size is provided
+        if self.crop:
+            preprocess.append(transforms.CenterCrop((512, 512)))
+            
+        # Apply transformations if any were added
+        if preprocess:
+            transform = transforms.Compose(preprocess)
+            image = transform(image)
+
+        directory_path = 'images/resize_cropped_test_images'
+        file_name = os.path.basename(path)
+        save_dir = os.path.join(directory_path, file_name)
+        print('Saving imgae to:', save_dir)
+        image.save(save_dir)
+
         image = np.array(image)
 
         # Get the Canny edge image
-        image = cv2.Canny(image, 100, 200)
+        image = cv2.Canny(image, 50, 100)
         image = image[:, :, None]
         image = np.concatenate([image, image, image], axis=2)
         canny_image = Image.fromarray(image)
@@ -106,15 +137,29 @@ if __name__ == "__main__":
         print("Using CPU as fallback.")
 
     # Load ControlNet
-    controlnet = ControlNetModel.from_pretrained("controlnet", torch_dtype=dtype)
+    controlnet = ControlNetModel.from_pretrained("controlnet", torch_dtype=dtype, use_safetensors=True)
+
+    # Load VAE as suggested by Realistic Vision
+    # vae = AutoencoderKL.from_pretrained(
+    #     "stabilityai/sd-vae-ft-mse",
+    #     torch_dtype=dtype,
+    #     use_safetensors=True,
+    # )
     
     # Load diffusion pipeline
     pipe = StableDiffusionControlNetPipeline.from_pretrained(
-        "runwayml/stable-diffusion-v1-5", controlnet=controlnet, torch_dtype=dtype
+        "SG161222/Realistic_Vision_V2.0", 
+        # vae=vae,
+        controlnet=controlnet, 
+        torch_dtype=dtype,
+        revision="refs/pr/4", 
+        use_safetensors=True
     )
 
     # Set scheduler
-    pipe.scheduler = DDIMScheduler.from_config(pipe.scheduler.config, timestep_spacing="linspace")
+    scheduler = EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config)
+    scheduler.config.timestep_spacing = 'leading'
+    pipe.scheduler = scheduler  
 
     pipe.to(device)
 
@@ -131,6 +176,8 @@ if __name__ == "__main__":
         diffusion_pipeline=pipe,
         key_words=["snowy", "golden hour"],
         negative_prompt="monochrome, trees in sky",
+        resize=True,
+        crop=True
     )
 
     dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
