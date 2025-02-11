@@ -29,8 +29,10 @@ class DiffusionAugmentationDataset(Dataset):
 
         self.scheduler_name = diffusion_pipeline.scheduler.__class__.__name__
         self.timestep_spacing = diffusion_pipeline.scheduler.config.timestep_spacing
-        self.num_inference_steps = 25
+        self.num_inference_steps = 5
         self.cfg_scale = 5
+        self.upscale_factor = 1.5
+        self.strength = 0.35
         self.resize = resize
         self.crop = crop
 
@@ -57,10 +59,13 @@ class DiffusionAugmentationDataset(Dataset):
             prompt=text_prompt, 
             num_inference_steps=self.num_inference_steps, 
             guidance_scale=self.cfg_scale,
+            strength=self.strength,
             negative_prompt=self.negative_prompt,
             generator=generator, 
-            image=image
-        ).images[0]
+            image=image,
+            height=int(image.height * self.upscale_factor),
+            width=int(image.width * self.upscale_factor)
+            ).images[0]
         generation_time = time.time() - start_time
         print(f"Image generation time: {generation_time:.5f} seconds")
 
@@ -70,7 +75,7 @@ class DiffusionAugmentationDataset(Dataset):
         save_dir = os.path.join(
             directory_path,
             f"{self.scheduler_name}_{self.timestep_spacing}",
-            f"augmented_{self.num_inference_steps}steps_{self.cfg_scale}scale",
+            f"augmented_{self.num_inference_steps}steps_{self.cfg_scale}scale_{self.strength}strength",
             f"resize_{self.resize}_crop_{self.crop}"
         )
         os.makedirs(save_dir, exist_ok=True)
@@ -140,16 +145,16 @@ if __name__ == "__main__":
     controlnet = ControlNetModel.from_pretrained("controlnet", torch_dtype=dtype, use_safetensors=True)
 
     # Load VAE as suggested by Realistic Vision
-    # vae = AutoencoderKL.from_pretrained(
-    #     "stabilityai/sd-vae-ft-mse",
-    #     torch_dtype=dtype,
-    #     use_safetensors=True,
-    # )
+    vae = AutoencoderKL.from_single_file(
+        "sd-vae-ft-mse-original/diffusion_pytorch_model.safetensors",
+        torch_dtype=dtype,
+        use_safetensors=True,
+    )
     
     # Load diffusion pipeline
     pipe = StableDiffusionControlNetPipeline.from_pretrained(
         "SG161222/Realistic_Vision_V2.0", 
-        # vae=vae,
+        vae=vae,
         controlnet=controlnet, 
         torch_dtype=dtype,
         revision="refs/pr/4", 
@@ -158,7 +163,7 @@ if __name__ == "__main__":
 
     # Set scheduler
     scheduler = EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config)
-    scheduler.config.timestep_spacing = 'leading'
+    scheduler.config.timestep_spacing = 'trailing'
     pipe.scheduler = scheduler  
 
     pipe.to(device)
@@ -176,8 +181,8 @@ if __name__ == "__main__":
         diffusion_pipeline=pipe,
         key_words=["snowy", "golden hour"],
         negative_prompt="monochrome, trees in sky",
-        resize=True,
-        crop=True
+        resize=False,
+        crop=False
     )
 
     dataloader = DataLoader(dataset, batch_size=1, shuffle=False)
