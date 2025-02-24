@@ -1,5 +1,15 @@
 from torch.utils.data import Dataset
-from diffusers import StableDiffusionControlNetPipeline, ControlNetModel, UniPCMultistepScheduler, DDIMScheduler, AutoencoderKL, EulerDiscreteScheduler, EulerAncestralDiscreteScheduler, PNDMScheduler
+from diffusers import (
+    StableDiffusionControlNetPipeline, 
+    ControlNetModel, 
+    UniPCMultistepScheduler, 
+    DDIMScheduler, 
+    AutoencoderKL, 
+    EulerDiscreteScheduler, 
+    EulerAncestralDiscreteScheduler, 
+    PNDMScheduler, 
+    DPMSolverMultistepScheduler
+)
 import torch
 from torch.utils.data import DataLoader
 import os
@@ -8,18 +18,19 @@ import numpy as np
 import cv2
 from torchvision import transforms
 import time
+import glob
 
 class DiffusionAugmentationDataset(Dataset):
-    def __init__(self, image_paths, diffusion_pipeline, key_words, negative_prompt, resize, crop):
+    def __init__(self, images_paths, diffusion_pipeline, key_words, negative_prompt, resize, crop):
         """
         Args:
-            image_paths (list): List of image file paths.
+            images_folder (list): List of image file paths.
             diffusion_model: Pre-loaded Stable Diffusion pipeline.
             key_words (list): List of key words for text conditioning.
             negative_prompt (str): Negative prompt for refinement.
             transform (callable, optional): Optional transform to apply to images after augmentation.
         """
-        self.image_paths = image_paths
+        self.images_folder = images_folder
         self.diffusion_pipeline = diffusion_pipeline
         self.key_words = key_words
         self.negative_prompt = negative_prompt
@@ -27,22 +38,22 @@ class DiffusionAugmentationDataset(Dataset):
             transforms.ToTensor(),  # Convert PIL image to tensor
         ])
 
+        self.model_name = self.diffusion_pipeline._name_or_path.split("/")[-1]
         self.scheduler_name = diffusion_pipeline.scheduler.__class__.__name__
         self.timestep_spacing = diffusion_pipeline.scheduler.config.timestep_spacing
-        self.num_inference_steps = 5
-        self.cfg_scale = 5
-        self.upscale_factor = 1.5
-        self.strength = 0.35
+        self.num_inference_steps = 50
+        self.cfg_scale = 7.5
+        self.upscale_factor = 1
         self.resize = resize
         self.crop = crop
 
 
     def __len__(self):
-        return len(self.image_paths)
+        return len(self.images_folder)
 
     def __getitem__(self, idx):
         # Load the image
-        original_path = self.image_paths[idx]
+        original_path = self.images_folder[idx]
         image = self.load_image(original_path)
 
         # Choose a random key word
@@ -59,7 +70,6 @@ class DiffusionAugmentationDataset(Dataset):
             prompt=text_prompt, 
             num_inference_steps=self.num_inference_steps, 
             guidance_scale=self.cfg_scale,
-            strength=self.strength,
             negative_prompt=self.negative_prompt,
             generator=generator, 
             image=image,
@@ -74,9 +84,10 @@ class DiffusionAugmentationDataset(Dataset):
         file_name = os.path.basename(original_path)
         save_dir = os.path.join(
             directory_path,
+            self.model_name,
             f"{self.scheduler_name}_{self.timestep_spacing}",
-            f"augmented_{self.num_inference_steps}steps_{self.cfg_scale}scale_{self.strength}strength",
-            f"resize_{self.resize}_crop_{self.crop}"
+            f"augmented_{self.num_inference_steps}steps_{self.cfg_scale}scale",
+            f"resize_{self.resize}_crop_{self.crop}_{self.upscale_factor}upscale"
         )
         os.makedirs(save_dir, exist_ok=True)
         save_path = os.path.join(save_dir, f"{file_name}")
@@ -110,10 +121,10 @@ class DiffusionAugmentationDataset(Dataset):
             transform = transforms.Compose(preprocess)
             image = transform(image)
 
-        directory_path = 'images/resize_cropped_test_images'
+        directory_path = os.path.join(os.path.dirname(path), "resize_cropped_test_images")
+        os.makedirs(directory_path, exist_ok=True)
         file_name = os.path.basename(path)
         save_dir = os.path.join(directory_path, file_name)
-        print('Saving imgae to:', save_dir)
         image.save(save_dir)
 
         image = np.array(image)
@@ -162,8 +173,8 @@ if __name__ == "__main__":
     )
 
     # Set scheduler
-    scheduler = EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config)
-    scheduler.config.timestep_spacing = 'trailing'
+    scheduler = EulerAncestralDiscreteScheduler.from_config(pipe.scheduler.config, use_karras_sigmas=True)
+    scheduler.config.timestep_spacing = 'leading'
     pipe.scheduler = scheduler  
 
     pipe.to(device)
@@ -172,14 +183,13 @@ if __name__ == "__main__":
         pipe.enable_model_cpu_offload()
 
     # Dataset instantiation
+    images_folder = 'images/sim2real/'
+    images_paths = glob.glob(f'{images_folder}/*.png')
+
     dataset = DiffusionAugmentationDataset(
-        image_paths=[
-            "images/berlin_000003_000019_leftImg8bit.png", 
-            "images/berlin_000058_000019_leftImg8bit.png",
-            "images/berlin_000446_000019_leftImg8bit.png"
-        ],
+        images_paths=images_paths,
         diffusion_pipeline=pipe,
-        key_words=["snowy", "golden hour"],
+        key_words=["daytime"],
         negative_prompt="monochrome, trees in sky",
         resize=False,
         crop=False
