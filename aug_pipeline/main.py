@@ -24,13 +24,13 @@ class DiffusionAugmentationDataset(Dataset):
     def __init__(self, images_paths, diffusion_pipeline, key_words, negative_prompt, resize, crop):
         """
         Args:
-            images_folder (list): List of image file paths.
+            images_paths (list): List of image file paths.
             diffusion_model: Pre-loaded Stable Diffusion pipeline.
             key_words (list): List of key words for text conditioning.
             negative_prompt (str): Negative prompt for refinement.
             transform (callable, optional): Optional transform to apply to images after augmentation.
         """
-        self.images_folder = images_folder
+        self.images_paths = images_paths
         self.diffusion_pipeline = diffusion_pipeline
         self.key_words = key_words
         self.negative_prompt = negative_prompt
@@ -49,11 +49,11 @@ class DiffusionAugmentationDataset(Dataset):
 
 
     def __len__(self):
-        return len(self.images_folder)
+        return len(self.images_paths)
 
     def __getitem__(self, idx):
         # Load the image
-        original_path = self.images_folder[idx]
+        original_path = self.images_paths[idx]
         image = self.load_image(original_path)
 
         # Choose a random key word
