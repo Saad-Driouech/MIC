@@ -8,6 +8,7 @@ from PIL import Image
 import os
 import numpy as np
 
+
 # --------------------
 # Dataset
 # --------------------
@@ -17,8 +18,9 @@ class GTADataset(Dataset):
         self.mask_dir = mask_dir
         self.images = sorted(os.listdir(image_dir))
         self.feature_extractor = feature_extractor
-        self.resize = T.Resize((512, 1024), interpolation=Image.BILINEAR)
-        self.to_tensor = T.ToTensor()
+        self.image_resize = T.Resize((512, 1024), interpolation=Image.BILINEAR)
+        self.mask_resize = T.Resize((512, 1024), interpolation=Image.NEAREST)
+
 
     def __len__(self):
         return len(self.images)
@@ -26,17 +28,29 @@ class GTADataset(Dataset):
     def __getitem__(self, idx):
         img_name = self.images[idx]
         img_path = os.path.join(self.image_dir, img_name)
-        mask_path = os.path.join(self.mask_dir, img_name.replace("_augmented", "").replace(".jpg", ".png"))
+        mask_path = os.path.join(self.mask_dir, img_name.replace("_augmented", "").replace(".png", "_labelTrainIds.png"))
 
         image = Image.open(img_path).convert("RGB")
-        mask = Image.open(mask_path)
+        with Image.open(mask_path) as img:
+            mask = np.array(img).astype(np.uint8)
 
-        image = self.resize(image)
-        mask = self.resize(mask)
+        image = self.image_resize(image)
 
-        encoding = self.feature_extractor(images=image, return_tensors="pt", padding=True)
+        mask = Image.fromarray(mask)  # convert to PIL first
+        mask = self.mask_resize(mask)
+        mask_np = np.array(mask).astype(np.uint8)
+
+        encoding = self.feature_extractor(images=image, return_tensors="pt")
         pixel_values = encoding["pixel_values"].squeeze()
-        label = torch.from_numpy(np.array(mask)).long()
+
+        label = torch.from_numpy(mask_np).long()
+
+        # unique_vals, counts = np.unique(mask_np, return_counts=True)
+        # print("Mask value counts:")
+        # for val, count in zip(unique_vals, counts):
+        #     print(f"Value {val}: {count} pixels")
+        # mapped_mask = map_labels(mask_np)
+        # label = torch.from_numpy(mask_np).long()
 
         return {
             "pixel_values": pixel_values,
@@ -46,22 +60,19 @@ class GTADataset(Dataset):
 # --------------------
 # Training
 # --------------------
-def train(image_dir, label_dir, num_epochs=20, batch_size=4, lr=5e-5, save_path="segformer_gta.pt"):
-    # Create a SegFormer configuration (this doesn't load any pretrained weights)
+def train(image_dir, mask_dir, num_epochs=20, batch_size=4, lr=5e-5, save_path="segformer_gta19.pt"):
     config = SegformerConfig(
-        num_labels=35,  # Adjust this based on your dataset
-        hidden_size=256,  # SegFormer has different size variants
-        num_attention_heads=[4] * 12,  # List for the number of attention heads per layer (example: 4 heads for each layer)
-        num_hidden_layers=12,  # Adjust layers as per the variant you're using (base, large, etc.)
+        num_labels=19,
+        ignore_index=255,
+        hidden_size=256,
+        num_attention_heads=[4] * 12,
+        num_hidden_layers=12,
     )
-    
-    # Initialize the model with the configuration (no pretrained weights)
-    model = SegformerForSemanticSegmentation(config)
 
-    # Feature extractor (can use default or create your own based on GTA data)
+    model = SegformerForSemanticSegmentation(config)
     feature_extractor = SegformerFeatureExtractor.from_pretrained("nvidia/segformer-b2-finetuned-cityscapes-1024-1024")
 
-    dataset = GTADataset(image_dir, label_dir, feature_extractor)
+    dataset = GTADataset(image_dir, mask_dir, feature_extractor)
     dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True, num_workers=4)
 
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
@@ -91,28 +102,27 @@ def train(image_dir, label_dir, num_epochs=20, batch_size=4, lr=5e-5, save_path=
         avg_loss = total_loss / len(dataloader)
         print(f"Epoch {epoch+1} finished. Avg Loss: {avg_loss:.4f}")
 
-    # Save the model
     torch.save(model.state_dict(), save_path)
     print(f"Model saved to {save_path}")
 
 # --------------------
-# Run
+# Run from CLI
 # --------------------
 if __name__ == "__main__":
     import argparse
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--image_dir", type=str, required=True, help="Path to images")
-    parser.add_argument("--label_dir", type=str, required=True, help="Path to segmentation masks")
+    parser.add_argument("--image_dir", type=str, required=True, help="Path to GTA5 images")
+    parser.add_argument("--mask_dir", type=str, required=True, help="Path to GTA5 masks")
     parser.add_argument("--epochs", type=int, default=20)
     parser.add_argument("--batch_size", type=int, default=4)
     parser.add_argument("--lr", type=float, default=5e-5)
-    parser.add_argument("--save_path", type=str, default="segformer_gta.pt")
+    parser.add_argument("--save_path", type=str, default="segformer_gta19.pt")
     args = parser.parse_args()
 
     train(
         image_dir=args.image_dir,
-        label_dir=args.label_dir,
+        mask_dir=args.mask_dir,
         num_epochs=args.epochs,
         batch_size=args.batch_size,
         lr=args.lr,
